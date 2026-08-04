@@ -1,0 +1,14 @@
+services:
+  api:
+    environment:
+      APP_ENV: production
+      DEV_AUTH: "false"
+      TELEGRAM_AUTO_SETUP: ${TELEGRAM_AUTO_SETUP:-true}
+    ports: !override []
+
+  web:
+    ports: !override
+      - "${WEB_BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-8088}:80"
+
+  vllm:
+    ports: !override []

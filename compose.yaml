@@ -1,0 +1,151 @@
+name: octa-oracle
+
+x-api-build: &api-build
+  context: .
+  dockerfile: apps/api/Dockerfile
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-octa_oracle}
+      POSTGRES_USER: ${POSTGRES_USER:-octa_oracle}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-postgres-change-me}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      - backend
+
+  migrate:
+    build: *api-build
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-octa_oracle}:${POSTGRES_PASSWORD:-local-postgres-change-me}@postgres:5432/${POSTGRES_DB:-octa_oracle}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+
+  api:
+    build: *api-build
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_NAME: ${APP_NAME:-Octa Oracle}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8088}
+      MINI_APP_URL: ${MINI_APP_URL:-http://localhost:8088}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8088,http://localhost:5173}
+      DEV_AUTH: ${DEV_AUTH:-true}
+      DEV_TELEGRAM_USER_ID: ${DEV_TELEGRAM_USER_ID:-1}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      TELEGRAM_INIT_DATA_MAX_AGE_SECONDS: ${TELEGRAM_INIT_DATA_MAX_AGE_SECONDS:-3600}
+      TELEGRAM_AUTO_SETUP: ${TELEGRAM_AUTO_SETUP:-false}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-octa_oracle}:${POSTGRES_PASSWORD:-local-postgres-change-me}@postgres:5432/${POSTGRES_DB:-octa_oracle}
+      DB_AUTO_CREATE: "false"
+      LLM_MODE: ${LLM_MODE:-mock}
+      LLM_SYSTEM_PROMPT: ${LLM_SYSTEM_PROMPT:-Ты полезный ассистент. Отвечай на языке пользователя, точно и понятно.}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.6}
+      LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-4096}
+      LLM_CONTEXT_CHAR_BUDGET: ${LLM_CONTEXT_CHAR_BUDGET:-8000}
+      SHOW_REASONING: ${SHOW_REASONING:-false}
+      VLLM_BASE_URL: ${VLLM_BASE_URL:-http://vllm:8000/v1}
+      VLLM_API_KEY: ${VLLM_API_KEY:-local-vllm-key}
+      VLLM_MODEL: ${VLLM_MODEL:-deepseek-r1-8b}
+      MAX_INPUT_CHARS: ${MAX_INPUT_CHARS:-16000}
+      MAX_CONCURRENT_GENERATIONS_PER_USER: ${MAX_CONCURRENT_GENERATIONS_PER_USER:-1}
+      RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE:-20}
+      MOCK_CHUNK_DELAY_SECONDS: ${MOCK_CHUNK_DELAY_SECONDS:-0.025}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${API_PORT:-8001}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    stop_grace_period: 30s
+    networks:
+      - backend
+      - egress
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8088}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - backend
+      - egress
+
+  vllm:
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:latest}
+    profiles: ["gpu"]
+    restart: unless-stopped
+    command:
+      - --model
+      - ${VLLM_MODEL_SOURCE:-deepseek-ai/DeepSeek-R1-0528-Qwen3-8B}
+      - --served-model-name
+      - ${VLLM_MODEL:-deepseek-r1-8b}
+      - --api-key
+      - ${VLLM_API_KEY:-local-vllm-key}
+      - --reasoning-parser
+      - deepseek_r1
+      - --dtype
+      - auto
+      - --max-model-len
+      - ${VLLM_MAX_MODEL_LEN:-8192}
+      - --gpu-memory-utilization
+      - ${VLLM_GPU_MEMORY_UTILIZATION:-0.90}
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    gpus: all
+    shm_size: 8gb
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+      - vllm-cache:/root/.cache/vllm
+    ports:
+      - "127.0.0.1:${VLLM_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 60
+      start_period: 10m
+    stop_grace_period: 2m
+    networks:
+      - backend
+      - egress
+
+volumes:
+  postgres-data:
+  huggingface-cache:
+  vllm-cache:
+
+networks:
+  backend:
+    internal: true
+  egress:
