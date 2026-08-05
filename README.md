@@ -53,6 +53,22 @@ docker compose --profile gpu up --build
 локального контейнера настраивается переменной `VLLM_MODEL_SOURCE`; по умолчанию
 используется исходный BF16-репозиторий, указанный в архитектуре.
 
+### NVIDIA GTX 1070 и другие Pascal GPU
+
+Для 8 ГБ VRAM используйте отдельный override: он запускает CUDA 12 сборку
+`llama.cpp` с GGUF Q4_K_M (около 5 ГБ), контекстом 4096 и одним ответом до 1024
+токенов. CUDA 13 для Pascal не подходит.
+
+```powershell
+docker compose -f compose.yaml -f compose.legacy-gpu.yaml up -d --build --wait --wait-timeout 1800
+docker compose -f compose.yaml -f compose.legacy-gpu.yaml logs -f llama-cpp
+```
+
+Первая команда завершится только после готовности модели; первый запуск скачает
+её в отдельный persistent volume. При нехватке VRAM
+уменьшите `LEGACY_LLM_CONTEXT_SIZE`, а затем при необходимости выберите
+`LEGACY_LLM_MODEL_SOURCE=bartowski/deepseek-ai_DeepSeek-R1-0528-Qwen3-8B-GGUF:Q3_K_M`.
+
 ## Подключение Telegram
 
 Для проверки внутри Telegram нужен публичный HTTPS URL. Укажите его и секреты в

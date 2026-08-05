@@ -1,0 +1,44 @@
+services:
+  api:
+    environment:
+      LLM_MODE: vllm
+      LLM_MAX_OUTPUT_TOKENS: ${LEGACY_LLM_MAX_OUTPUT_TOKENS:-1024}
+      LLM_CONTEXT_CHAR_BUDGET: ${LEGACY_LLM_CONTEXT_CHAR_BUDGET:-8000}
+      VLLM_BASE_URL: http://llama-cpp:8080/v1
+      VLLM_MODEL: ${LEGACY_LLM_MODEL_ALIAS:-deepseek-r1-8b-q4}
+
+  llama-cpp:
+    image: ${LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}
+    restart: unless-stopped
+    command:
+      - --hf-repo
+      - ${LEGACY_LLM_MODEL_SOURCE:-bartowski/deepseek-ai_DeepSeek-R1-0528-Qwen3-8B-GGUF:Q4_K_M}
+      - --alias
+      - ${LEGACY_LLM_MODEL_ALIAS:-deepseek-r1-8b-q4}
+      - --api-key
+      - ${VLLM_API_KEY:-local-vllm-key}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --ctx-size
+      - ${LEGACY_LLM_CONTEXT_SIZE:-4096}
+      - --n-predict
+      - ${LEGACY_LLM_MAX_OUTPUT_TOKENS:-1024}
+      - --n-gpu-layers
+      - ${LEGACY_LLM_GPU_LAYERS:-99}
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      LLAMA_CACHE: /models
+    gpus: all
+    volumes:
+      - llama-cpp-cache:/models
+    ports:
+      - "127.0.0.1:${LEGACY_LLM_PORT:-8000}:8080"
+    stop_grace_period: 2m
+    networks:
+      - backend
+      - egress
+
+volumes:
+  llama-cpp-cache:
